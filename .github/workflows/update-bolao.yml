@@ -1,0 +1,163 @@
+name: Atualizar Bolão Raja
+
+on:
+  schedule:
+    # Roda a cada hora das 10h às 23h (horário de Brasília = 13h às 02h UTC)
+    - cron: '0 13-23,0-2 * * *'
+  workflow_dispatch: # Permite rodar manualmente
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scraping UFMG e salvando no Supabase
+        run: |
+          cat << 'EOF' > script.js
+          const https = require('https');
+          const http = require('http');
+
+          // Busca HTML da UFMG
+          function fetchUFMG() {
+            return new Promise((resolve, reject) => {
+              https.get('https://www.mat.ufmg.br/futebol/classificacao-geral_seriea/', (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve(data));
+              }).on('error', reject);
+            });
+          }
+
+          // Salva no Supabase
+          function saveToSupabase(tabela) {
+            return new Promise((resolve, reject) => {
+              const payload = JSON.stringify({
+                tabela: tabela,
+                last_update: new Date().toISOString(),
+                source: 'UFMG'
+              });
+
+              const options = {
+                hostname: 'ftujctzhsitfdlctbohr.supabase.co',
+                path: '/rest/v1/bolao_brasileirao',
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': process.env.SUPABASE_SERVICE_KEY,
+                  'Authorization': 'Bearer ' + process.env.SUPABASE_SERVICE_KEY,
+                  'Prefer': 'return=minimal'
+                }
+              };
+
+              const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve({ status: res.statusCode, data }));
+              });
+              req.on('error', reject);
+              req.write(payload);
+              req.end();
+            });
+          }
+
+          async function main() {
+            console.log('Buscando dados da UFMG...');
+            const html = await fetchUFMG();
+            
+            // Extrai tabela
+            const tabela = [];
+            const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+            const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+
+            let trMatch;
+            while ((trMatch = trRegex.exec(html)) !== null) {
+              const rowHtml = trMatch[1];
+              const cells = [];
+              let tdMatch;
+              tdRegex.lastIndex = 0;
+              
+              while ((tdMatch = tdRegex.exec(rowHtml)) !== null) {
+                let value = tdMatch[1].replace(/<[^>]*>/g, '').trim();
+                value = value
+                  .replace(/&Oacute;/g, 'Ó')
+                  .replace(/&Aacute;/g, 'Á')
+                  .replace(/&Eacute;/g, 'É')
+                  .replace(/&Iacute;/g, 'Í')
+                  .replace(/&Uacute;/g, 'Ú')
+                  .replace(/&Atilde;/g, 'Ã')
+                  .replace(/&Otilde;/g, 'Õ')
+                  .replace(/&Ccedil;/g, 'Ç')
+                  .replace(/&Ecirc;/g, 'Ê')
+                  .replace(/&amp;/g, '&');
+                cells.push(value);
+              }
+
+              if (cells.length >= 10 && /^\d+$/.test(cells[0])) {
+                const nameMap = {
+                  'ATLÉTICO-MG': 'Atlético-MG',
+                  'ATHLETICO-PR': 'Athletico-PR',
+                  'VASCO DA GAMA': 'Vasco',
+                  'SÃO PAULO': 'São Paulo',
+                  'GRÊMIO': 'Grêmio',
+                  'VITÓRIA': 'Vitória',
+                  'CHAPECOENSE': 'Chapecoense',
+                  'FLUMINENSE': 'Fluminense',
+                  'BAHIA': 'Bahia',
+                  'BRAGANTINO': 'Bragantino',
+                  'PALMEIRAS': 'Palmeiras',
+                  'CRUZEIRO': 'Cruzeiro',
+                  'BOTAFOGO': 'Botafogo',
+                  'MIRASSOL': 'Mirassol',
+                  'FLAMENGO': 'Flamengo',
+                  'CORINTHIANS': 'Corinthians',
+                  'INTERNACIONAL': 'Internacional',
+                  'CORITIBA': 'Coritiba',
+                  'SANTOS': 'Santos',
+                  'REMO': 'Remo',
+                };
+                
+                const nome = cells[1];
+                tabela.push({
+                  pos: parseInt(cells[0]),
+                  nome: nameMap[nome] || nome,
+                  pontos: parseInt(cells[2]) || 0,
+                  jogos: parseInt(cells[3]) || 0,
+                  vitorias: parseInt(cells[4]) || 0,
+                  empates: parseInt(cells[5]) || 0,
+                  derrotas: parseInt(cells[6]) || 0,
+                  gf: parseInt(cells[7]) || 0,
+                  gc: parseInt(cells[8]) || 0,
+                  saldo: parseInt(cells[9]) || 0
+                });
+              }
+            }
+
+            console.log('Times encontrados:', tabela.length);
+            
+            if (tabela.length === 0) {
+              console.error('Nenhum time encontrado!');
+              process.exit(1);
+            }
+
+            console.log('Primeiro:', tabela[0].nome);
+            console.log('Último:', tabela[tabela.length-1].nome);
+
+            console.log('Salvando no Supabase...');
+            const result = await saveToSupabase(tabela);
+            console.log('Resultado:', result.status);
+            
+            if (result.status >= 400) {
+              console.error('Erro ao salvar:', result.data);
+              process.exit(1);
+            }
+            
+            console.log('Atualizado com sucesso!');
+          }
+
+          main().catch(err => {
+            console.error('Erro:', err);
+            process.exit(1);
+          });
+          EOF
+          node script.js
+        env:
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
