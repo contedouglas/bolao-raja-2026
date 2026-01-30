@@ -37,7 +37,7 @@ jobs:
               });
 
               const options = {
-                hostname: 'ftujctzhsitfdlctbohr.supabase.co',
+                hostname: 'kdkaslhclgvpcxtsbant.supabase.co',
                 path: '/rest/v1/bolao_brasileirao',
                 method: 'POST',
                 headers: {
