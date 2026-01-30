@@ -2,9 +2,10 @@ name: Atualizar Bolão Raja
 
 on:
   schedule:
-    # Roda a cada hora das 10h às 23h (horário de Brasília = 13h às 02h UTC)
-    - cron: '0 13-23,0-2 * * *'
-  workflow_dispatch: # Permite rodar manualmente
+    # A cada 10 minutos, das 13h às 05h UTC (10h às 2h Brasília)
+    - cron: '*/10 13-23 * * *'
+    - cron: '*/10 0-5 * * *'
+  workflow_dispatch:
 
 jobs:
   update:
@@ -14,9 +15,7 @@ jobs:
         run: |
           cat << 'EOF' > script.js
           const https = require('https');
-          const http = require('http');
 
-          // Busca HTML da UFMG
           function fetchUFMG() {
             return new Promise((resolve, reject) => {
               https.get('https://www.mat.ufmg.br/futebol/classificacao-geral_seriea/', (res) => {
@@ -27,7 +26,6 @@ jobs:
             });
           }
 
-          // Salva no Supabase
           function saveToSupabase(tabela) {
             return new Promise((resolve, reject) => {
               const payload = JSON.stringify({
@@ -63,7 +61,6 @@ jobs:
             console.log('Buscando dados da UFMG...');
             const html = await fetchUFMG();
             
-            // Extrai tabela
             const tabela = [];
             const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
             const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
